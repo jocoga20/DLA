@@ -30,7 +30,6 @@ def backbone_accuracy(model, trainloader, testloader):
     train_feats, ytrain = get_features(model, trainloader)
     test_feats, ytest = get_features(model, testloader)
     test_size = test_feats.shape[0]
-    print(test_size)
     train_centroids = torch.vstack([train_feats[ytrain == i].mean(axis=0) for i in range(43)])
     
     corrects = 0
@@ -77,9 +76,10 @@ def main_several_models():
         print(backbone_accuracy(m, trainloader, testloader))
 
 def main():
-    m = torchvision.models.resnet18().cuda()
+    m = torchvision.models.efficientnet_b0().cuda()
     rework_model(m, last_layer='linear', output_classes=43, do_freeze_backbone=False)
-    train_dict = torch.load('/home/jonathan/Desktop/DLA/checkpoints/old_resnet18.acc91.pt')
+#    train_dict = torch.load('/home/jonathan/Desktop/DLA/checkpoints/efficientnetb0.acc96.pt')
+    train_dict = torch.load('/home/jonathan/Desktop/DLA/checkpoints/efficientnetb0.acc96.pt')
     m.load_state_dict(train_dict['model'])
     rework_model(m, last_layer='identity')
     freeze_model(m)

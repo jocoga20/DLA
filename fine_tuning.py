@@ -11,15 +11,12 @@ from metrics import *
 
 def main():
     num_classes = 43
-    epochs = 100
+    epochs = 500
     trainloader, testloader = default_loaders(train_batch_size=1024, test_batch_size=128)
     model = torchvision.models.resnet18()
     rework_model(model, last_layer='linear', output_classes=num_classes, do_freeze_backbone=False)
-    train_dict = torch.load('/home/jonathan/Desktop/DLA/checkpoints/resnet18.acc91.pt')
-    model.load_state_dict(train_dict['model'])
     model = model.cuda()
     optimizer = torch.optim.AdamW(params=model.parameters(), lr=5e-3, weight_decay=1e-3)
-    optimizer.load_state_dict(train_dict['optimizer'])
 
     wandb.login(key='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')
 
@@ -31,7 +28,6 @@ def main():
         T_mult=2,
         eta_min=1e-6
     )
-    scheduler.load_state_dict(train_dict['scheduler'])
 
     chance_level_mean_loss = math.log(num_classes)
     chance_level_accuracy = 1 / num_classes
@@ -42,7 +38,7 @@ def main():
     best_checkpoint = None
 
     try:
-        for e in tqdm(range(200, epochs + 200)):
+        for e in tqdm(range(epochs)):
             train_loss, train_acc = myrun.train(loader=trainloader)
             scheduler.step()
             with torch.no_grad():

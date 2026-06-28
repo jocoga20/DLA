@@ -1,4 +1,5 @@
 __pycache__/
-__wandb__/
+wandb/
 mydatasets/
 checkpoints/
+.vscode/
