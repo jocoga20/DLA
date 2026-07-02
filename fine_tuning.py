@@ -11,12 +11,12 @@ from metrics import *
 
 def main():
     num_classes = 43
-    epochs = 500
-    trainloader, testloader = default_loaders(train_batch_size=1024, test_batch_size=128)
-    model = torchvision.models.resnet18()
+    epochs = 100
+    trainloader, testloader = default_loaders(train_batch_size=256, test_batch_size=128)
+    model = torchvision.models.resnet50()
     rework_model(model, last_layer='linear', output_classes=num_classes, do_freeze_backbone=False)
     model = model.cuda()
-    optimizer = torch.optim.AdamW(params=model.parameters(), lr=5e-3, weight_decay=1e-3)
+    optimizer = torch.optim.SGD(params=model.parameters(), lr=1e-3, weight_decay=1e-3)
 
     wandb.login(key='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')
 
@@ -44,7 +44,7 @@ def main():
             with torch.no_grad():
                 test_loss, test_acc = myrun.eval(loader=testloader)
             if test_acc > best_acc:
-                save_path = f'checkpoints/resnet18.acc{round(test_acc*100)}.pt'
+                save_path = f'checkpoints/resnet50.acc{round(test_acc*100)}.pt'
                 best_acc = test_acc
                 best_checkpoint = {
                     'test_accuracy': best_acc,

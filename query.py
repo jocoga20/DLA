@@ -16,12 +16,14 @@ def get_features(model, loader: torch.utils.data.DataLoader):
     features = []
     ys = []
 
-    for x, y in loader:
-        x = x.cuda()
-        features.append(model(x))
+    for x, y in tqdm(loader):
+        features.append(model(x.cuda()))
         ys.append(y)
 
-    return torch.nn.functional.normalize(torch.vstack(features), dim=1), torch.concat(ys)
+    features = torch.vstack(features)
+    features = torch.nn.functional.normalize(features, dim=1)
+
+    return features, torch.concat(ys)
 
 def nearest_centroid_y(centroids, x):
     return (centroids - x).abs().sum(axis=1).argmin()
@@ -76,18 +78,18 @@ def main_several_models():
         print(backbone_accuracy(m, trainloader, testloader))
 
 def main():
-    m = torchvision.models.efficientnet_b0().cuda()
+    m = torchvision.models.resnet50(weights=None).cuda()
     rework_model(m, last_layer='linear', output_classes=43, do_freeze_backbone=False)
-#    train_dict = torch.load('/home/jonathan/Desktop/DLA/checkpoints/efficientnetb0.acc96.pt')
-    train_dict = torch.load('/home/jonathan/Desktop/DLA/checkpoints/efficientnetb0.acc96.pt')
+    train_dict = torch.load('checkpoints/resnet50.acc95.pt')
     m.load_state_dict(train_dict['model'])
-    rework_model(m, last_layer='identity')
-    freeze_model(m)
+    rework_model(m, last_layer='identity', do_freeze_backbone=True)
 
+    img_size = 128
     my_transform = t.Compose([
-        t.Resize((32, 32)),
-        t.ToImage(), t.ToDtype(torch.float32, scale=True),
-        t.Normalize(mean=gtsrb_mean, std=gtsrb_std)
+        t.Resize((img_size, img_size)),
+        t.ToImage(),
+        t.ToDtype(torch.float32, scale=True),
+        t.Normalize(gtsrb_mean, gtsrb_std)
     ])
 
     bs = 1024

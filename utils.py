@@ -21,11 +21,11 @@ gtsrb_test_size = 12630
 
 def default_loaders(train_batch_size, test_batch_size):
     persistent_workers = True
-    img_size = 32
+    img_size = 128
     train_transform = t.Compose([
         t.Resize((img_size, img_size)),              # oppure 48x48 o 64x64
         t.RandomAffine(
-            degrees=15,
+            degrees=15, 
             translate=(0.10, 0.10),
             scale=(0.9, 1.1),
             shear=10
