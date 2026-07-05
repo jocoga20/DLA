@@ -1,4 +1,3 @@
-import huggingface_hub as hfh
 import torchvision
 import torch
 import torchvision.transforms.v2 as t
@@ -6,6 +5,7 @@ from models import rework_model
 from utils import gtsrb_mean, gtsrb_std
 from datasets import load_dataset
 from torchvision.models.detection.rpn import AnchorGenerator
+from torchvision.ops import box_iou
 
 class HuggingfaceDataset(torch.utils.data.Dataset):
     def __init__(self, dataset, transform):
@@ -36,13 +36,13 @@ def prepare_backbone():
 @torch.inference_mode()
 def main():
     anchor_generator = AnchorGenerator(
-        sizes=((16,32,64,128,256,512)),
+        sizes=((26,)),
         aspect_ratios=((1.,),)
     )
     model = torchvision.models.detection.FasterRCNN(backbone=prepare_backbone(), num_classes=43, rpn_anchor_generator=anchor_generator)\
     .cuda()
     model.eval()
-    model.roi_heads.score_thresh = 0.001
+    model.roi_heads.score_thresh = 0.01
 
     loader = torch.utils.data.DataLoader(
         dataset=HuggingfaceDataset(get_dataset()['test'], transform=t.Compose([
@@ -56,9 +56,20 @@ def main():
     )
 
     for x, y in loader:
-        out = model(x.cuda())
-        print(out)
-        print(len(out))
+        out = model(x.cuda())[0]
+        gt_box = torch.tensor(y['box'], device='cuda')
+        gt_box[0,2:] += gt_box[0,:2]
+        ioumax = 0
+        for box_prop in out['boxes']:
+            box_prop = box_prop.reshape((1,-1))
+            box_prop[0,2:] += box_prop[0,:2]
+            print(box_prop, gt_box)
+            iou = box_iou(box_prop, gt_box)
+            print(iou)
+            exit()
+            if iou > ioumax:
+                ioumax = iou
+        print(ioumax)
         break
     
     
