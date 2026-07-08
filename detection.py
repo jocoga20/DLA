@@ -33,6 +33,9 @@ def prepare_backbone():
     m.out_channels = 2048       # 2048 if resnet50, 512 if resnet18
     return m
 
+def convert(tensors):
+    return tensors[:,2:] + tensors[:,:2]
+
 @torch.inference_mode()
 def main():
     anchor_generator = AnchorGenerator(
@@ -58,11 +61,11 @@ def main():
     for x, y in loader:
         out = model(x.cuda())[0]
         gt_box = torch.tensor(y['box'], device='cuda')
-        gt_box[0,2:] += gt_box[0,:2]
+        gt_box = convert(gt_box)
         ioumax = 0
         for box_prop in out['boxes']:
             box_prop = box_prop.reshape((1,-1))
-            box_prop[0,2:] += box_prop[0,:2]
+            convert(box_prop)
             print(box_prop, gt_box)
             iou = box_iou(box_prop, gt_box)
             print(iou)
