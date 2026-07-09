@@ -1,6 +1,9 @@
+from matplotlib import pyplot as plt
 import torch
 import torchvision
 import torchvision.transforms.v2 as t
+from torch import softmax
+from tqdm import tqdm
 
 mytransform = t.Compose([t.ToImage(), t.ToDtype(torch.float32, scale=True)])
 
@@ -11,7 +14,7 @@ def split_id_ood(dataset):
     ood_idx = []
     id_idx = []
 
-    for i, (_, y) in enumerate(dataset):
+    for i, (_, y) in enumerate(tqdm(dataset)):
         if y == 8:
             ood_idx.append(i)
         else:
@@ -81,30 +84,52 @@ def train(model, train_loader, optimizer, myloss):
     return train_loss, train_acc
 
 def setup_model(checkpoint = None):
-    if checkpoint:
-        return torch.load(checkpoint)['model']
-    else:
-        model = torchvision.models.resnet50(weights=None)
-        model.conv1 = torch.nn.Conv2d(1, 64, (7,7), (2,2), (3,3), bias=False)
-        model.fc = torch.nn.Linear(model.fc.in_features, 9)
-        model = model.cuda()
-        return model
+    m = torch.load(checkpoint, weights_only=False)['model']
+    m.fc = torch.nn.Identity()
+    return m
 
+@torch.inference_mode()
+def get_id_centroid(model, id_loader):
+    mean_tensor = torch.zeros(size=(2048,)).cuda()
+    model.eval()
+
+    for x, y in tqdm(id_loader):
+        mean_tensor += model(x.cuda()).sum(dim=0).squeeze()
+    
+    return mean_tensor / 9000
+
+
+def mean(x): return sum(x) / len(x)
+
+def dist(x, y):
+    return ((x - y) ** 2).sum()
+
+def present(x):
+    print(x.min(), x.mean(), x.max())
+
+@torch.inference_mode()
 def main_detect_ood():
     model = setup_model('check.pt').cuda()
     model.eval()
-    loader = torch.utils.data.DataLoader(
-        dataset=split_id_ood(get_dataset(train=False)),
-        batch_size=1,
-        shuffle=False,
-        num_workers=4,
-        pin_memory=True
-    )
 
-    torch.tensor().to(non)
+    id_centroid = torch.load('id_centroid.pt', weights_only=False)
 
-    for x, y in loader:
-        model(x.cuda(non_blocking=True))
+    id_train, ood_train = split_id_ood(get_dataset(train=True))
+
+    id_loader = torch.utils.data.DataLoader(id_train, batch_size=1024, shuffle=False, pin_memory=True)
+
+    ood_loader = torch.utils.data.DataLoader(ood_train, batch_size=1024, shuffle=False, pin_memory=True)
+
+    id_train = torch.vstack([model(x.cuda()).cpu() for x, y in tqdm(id_loader)]).cuda()
+    ood_train = torch.vstack([model(x.cuda()).cpu() for x, y in tqdm(ood_loader)]).cuda()
+
+    id_dist = ((id_train - id_centroid) ** 2).sum(dim=1)
+    ood_dist = ((ood_train - id_centroid) ** 2).sum(dim=1)
+
+    print('ID')
+    present(id_dist)
+    print('OOD')
+    present(ood_dist)
 
 def main():
     model = setup_model()
@@ -153,4 +178,4 @@ def main():
         save_checkpoint('check.pt', model, optimizer)
 
 if __name__ == '__main__':
-    main()
+    main_detect_ood()

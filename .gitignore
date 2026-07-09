@@ -5,3 +5,4 @@ checkpoints/
 .vscode/
 features/
 output/
+*.pt
