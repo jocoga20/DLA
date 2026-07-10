@@ -1,31 +1,15 @@
 from matplotlib import pyplot as plt
+import numpy as np
 import torch
 import torchvision
 import torchvision.transforms.v2 as t
 from torch import softmax
 from tqdm import tqdm
 
-mytransform = t.Compose([t.ToImage(), t.ToDtype(torch.float32, scale=True)])
-
-def get_dataset(train):
-    return torchvision.datasets.FashionMNIST('./mydatasets', download=True, train=train, transform=mytransform)
-
-def split_id_ood(dataset):
-    ood_idx = []
-    id_idx = []
-
-    for i, (_, y) in enumerate(tqdm(dataset)):
-        if y == 8:
-            ood_idx.append(i)
-        else:
-            id_idx.append(i)
-
-    return torch.utils.data.Subset(dataset, id_idx), torch.utils.data.Subset(dataset, ood_idx)
-
 def save_checkpoint(filename, model, optimizer):
     torch.save({'model': model, 'optimizer': optimizer}, filename)
 
-
+@torch.no_grad()
 def eval(model, test_loader, myloss):
     model.eval()
 
@@ -50,7 +34,7 @@ def eval(model, test_loader, myloss):
 
     test_loss = running_loss / total
     test_acc = correct / total
-    return test_loss,test_acc
+    return test_loss, test_acc
 
 def train(model, train_loader, optimizer, myloss):
     model.train()
@@ -105,31 +89,56 @@ def dist(x, y):
     return ((x - y) ** 2).sum()
 
 def present(x):
-    print(x.min(), x.mean(), x.max())
+    print(x.mean(), x.std())
 
-@torch.inference_mode()
+def get_centroids(x, y):
+    return torch.vstack([x[y == t].mean(0) for t in np.unique(y)])
+
+def centroids_distance(centroids: torch.Tensor, points: torch.Tensor):
+    return torch.cdist(points, centroids).min(dim=1).values
+
+
+default_transform = t.Compose([t.ToImage(), t.ToDtype(torch.float32, scale=True)])
+cifar10_transform = t.Compose([t.ToImage(), t.ToDtype(torch.float32, scale=True), t.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))])
+
+def get_id_dataset(train):
+    return torchvision.datasets.CIFAR10('./mydatasets', train=train, transform=cifar10_transform, download=True)
+
+def get_ood_dataset(train):
+    return torchvision.datasets.FakeData('./mydatasets', train=train, transform=default_transform, size=10_000 if train else 5_000, image_size=(3, 32, 32), num_classes=1)
+
 def main_detect_ood():
-    model = setup_model('check.pt').cuda()
-    model.eval()
+    id_train, id_test = get_id_dataset(train=True), get_id_dataset(train=False)
+    id_train_loader = torch.utils.data.DataLoader(
+        dataset=id_train,
+        batch_size=1024,
+        shuffle=True,
+        pin_memory=True
+    )
 
-    id_centroid = torch.load('id_centroid.pt', weights_only=False)
+    id_test_loader = torch.utils.data.DataLoader(
+        dataset=id_test,
+        batch_size=2048,
+        shuffle=False,
+        pin_memory=True
+    )
 
-    id_train, ood_train = split_id_ood(get_dataset(train=True))
+    model = torchvision.models.resnet18(weights=torchvision.models.ResNet18_Weights.IMAGENET1K_V1).cuda()
+    opt = torch.optim.SGD(model.parameters(), lr=1e-6)
+    myloss = torch.nn.CrossEntropyLoss(reduction='sum')
+    best_model_dict = None
+    best_acc = 0
 
-    id_loader = torch.utils.data.DataLoader(id_train, batch_size=1024, shuffle=False, pin_memory=True)
+    for e in range(50):
+        train_loss, train_acc = train(model, id_train_loader, opt, myloss)
+        test_loss, test_acc = eval(model, id_test_loader, myloss)
+        if test_acc > best_acc:
+            best_model_dict = model.state_dict()
+            best_acc = test_acc
 
-    ood_loader = torch.utils.data.DataLoader(ood_train, batch_size=1024, shuffle=False, pin_memory=True)
+        print(f'[{e}] L: {train_loss:.4f} | {test_loss:.4f} A: {train_acc:.2f} | {test_acc:.2f}')
 
-    id_train = torch.vstack([model(x.cuda()).cpu() for x, y in tqdm(id_loader)]).cuda()
-    ood_train = torch.vstack([model(x.cuda()).cpu() for x, y in tqdm(ood_loader)]).cuda()
-
-    id_dist = ((id_train - id_centroid) ** 2).sum(dim=1)
-    ood_dist = ((ood_train - id_centroid) ** 2).sum(dim=1)
-
-    print('ID')
-    present(id_dist)
-    print('OOD')
-    present(ood_dist)
+    torch.save(best_model_dict, f'resnet18.acc{int(best_acc*100)}.pt')
 
 def main():
     model = setup_model()
