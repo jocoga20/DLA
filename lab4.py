@@ -20,8 +20,6 @@ def eval(model, test_loader, myloss):
     with torch.no_grad():
         for x, y in test_loader:
             y = y.cuda(non_blocking=True)
-            y = torch.where(y > 8, y - 1, y)
-
             logits = model(x.cuda(non_blocking=True))
 
             loss = myloss(logits, y)
@@ -45,8 +43,6 @@ def train(model, train_loader, optimizer, myloss):
 
     for x, y in train_loader:
         y = y.cuda(non_blocking=True)
-        y = torch.where(y > 8, y - 1, y)
-
         optimizer.zero_grad()
 
         logits = model(x.cuda(non_blocking=True))
@@ -99,7 +95,10 @@ def centroids_distance(centroids: torch.Tensor, points: torch.Tensor):
 
 
 default_transform = t.Compose([t.ToImage(), t.ToDtype(torch.float32, scale=True)])
-cifar10_transform = t.Compose([t.ToImage(), t.ToDtype(torch.float32, scale=True), t.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))])
+cifar10_transform = t.Compose([t.ToImage(), t.ToDtype(torch.float32, scale=True),
+                               t.Resize((256,256)),
+                               t.CenterCrop((224, 224)),
+                               t.Normalize((0.485, 0.456, 0.406), (0.229, 0.224, 0.225))])
 
 def get_id_dataset(train):
     return torchvision.datasets.CIFAR10('./mydatasets', train=train, transform=cifar10_transform, download=True)
@@ -111,16 +110,19 @@ def main_detect_ood():
     id_train, id_test = get_id_dataset(train=True), get_id_dataset(train=False)
     id_train_loader = torch.utils.data.DataLoader(
         dataset=id_train,
-        batch_size=1024,
+        batch_size=32,
         shuffle=True,
-        pin_memory=True
+        pin_memory=True,
+        num_workers=12,
+        persistent_workers=True
     )
 
     id_test_loader = torch.utils.data.DataLoader(
         dataset=id_test,
-        batch_size=2048,
+        batch_size=32,
         shuffle=False,
-        pin_memory=True
+        pin_memory=True,
+        num_workers=4
     )
 
     model = torchvision.models.resnet18(weights=torchvision.models.ResNet18_Weights.IMAGENET1K_V1).cuda()
@@ -129,14 +131,15 @@ def main_detect_ood():
     best_model_dict = None
     best_acc = 0
 
-    for e in range(50):
-        train_loss, train_acc = train(model, id_train_loader, opt, myloss)
-        test_loss, test_acc = eval(model, id_test_loader, myloss)
-        if test_acc > best_acc:
-            best_model_dict = model.state_dict()
-            best_acc = test_acc
+    with open('trainlog.txt', 'w') as file:
+        for e in tqdm(range(50)):
+            train_loss, train_acc = train(model, id_train_loader, opt, myloss)
+            test_loss, test_acc = eval(model, id_test_loader, myloss)
+            if test_acc > best_acc:
+                best_model_dict = model.state_dict()
+                best_acc = test_acc
 
-        print(f'[{e}] L: {train_loss:.4f} | {test_loss:.4f} A: {train_acc:.2f} | {test_acc:.2f}')
+            print(f'[{e}] L: {train_loss:.4f} | {test_loss:.4f} A: {train_acc:.2f} | {test_acc:.2f}')
 
     torch.save(best_model_dict, f'resnet18.acc{int(best_acc*100)}.pt')
 
