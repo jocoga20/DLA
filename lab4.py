@@ -9,6 +9,9 @@ from torch import softmax
 from tqdm import tqdm
 from torch.utils.data import DataLoader, Dataset
 
+from Training import *
+from model_pipelines import full_fine_tuning
+
 def save_checkpoint(filename, model, optimizer):
     torch.save({'model': model, 'optimizer': optimizer}, filename)
 
@@ -16,66 +19,12 @@ def save_checkpoint(filename, model, optimizer):
 def max_softmax_eval(model, loader, temp = 1):
     values = []
 
-    for x in tqdm(loader):
-        logits = model(x.cuda()) / temp
-        logits = softmax(logits, dim=1).max(dim=1).values.cpu()
+    for x, y in tqdm(loader):
+        logits = model(x.cuda())
         values.append(logits)
         
     return torch.concat(values)
     
-
-@torch.no_grad()
-def eval(model, test_loader, myloss):
-    model.eval()
-
-    running_loss = 0.0
-    correct = 0
-    total = 0
-
-    for x, y in test_loader:
-        y = y.cuda(non_blocking=True)
-        logits = model(x.cuda(non_blocking=True))
-
-        loss = myloss(logits, y)
-
-        running_loss += loss.item()
-
-        pred = logits.argmax(dim=1)
-        correct += (pred == y).sum().item()
-        total += y.size(0)
-
-    test_loss = running_loss / total
-    test_acc = correct / total
-    return test_loss, test_acc
-
-def train(model, train_loader, optimizer, myloss):
-    model.train()
-
-    running_loss = 0.0
-    correct = 0
-    total = 0
-
-    for x, y in train_loader:
-        y = y.cuda(non_blocking=True)
-        optimizer.zero_grad()
-
-        logits = model(x.cuda(non_blocking=True))
-
-        loss = myloss(logits, y)
-
-        loss.backward()
-
-        optimizer.step()
-
-        running_loss += loss.item()
-
-        pred = logits.argmax(dim=1)
-        correct += (pred == y).sum().item()
-        total += y.size(0)
-
-    train_loss = running_loss / total
-    train_acc = correct / total
-    return train_loss, train_acc
 
 def setup_model(checkpoint = None):
     m = torch.load(checkpoint, weights_only=False)['model']
@@ -109,70 +58,94 @@ def centroids_distance(centroids: torch.Tensor, points: torch.Tensor):
 
 
 default_transform = t.Compose([t.ToImage(), t.ToDtype(torch.float32, scale=True)])
-cifar10_transform = t.Compose([t.ToImage(), t.ToDtype(torch.float32, scale=True),
-                               t.Resize((256,256)),
-                               t.CenterCrop((224, 224)),
-                               t.Normalize((0.485, 0.456, 0.406), (0.229, 0.224, 0.225))])
 
-def get_id_dataset(train):
-    return torchvision.datasets.CIFAR10('./mydatasets', train=train, transform=cifar10_transform, download=True)
+from torchvision.transforms.v2 import InterpolationMode
 
-def get_ood_dataset(size=50_000):
-    return torchvision.datasets.FakeData(size = size, image_size=(3, 32, 32), transform=default_transform, num_classes=1)
+train_transform = t.Compose([
+    t.AugMix(),
+    t.ToImage(),
+    t.ToDtype(torch.float32, scale=True)
+])
 
-def freeze_model(model: torch.nn.Module):
-    for p in model.parameters():
-        p.requires_grad_(False)
+infer_transform = t.Compose([
+    t.ToImage(),
+    t.ToDtype(torch.float32, scale=True)
+])
+
+# train_transform = t.Compose([
+#     t.Resize(256, interpolation=InterpolationMode.BILINEAR),
+#     t.RandomResizedCrop(224, scale=(0.8, 1.0)),
+#     t.RandomHorizontalFlip(p=0.5),
+#     t.RandAugment(),
+#     t.ToImage(),
+#     t.ToDtype(torch.float32, scale=True),
+#     t.Normalize(
+#         mean=[0.485, 0.456, 0.406],
+#         std=[0.229, 0.224, 0.225]
+#     ),
+#     t.RandomErasing(
+#         p=0.25,
+#         scale=(0.02, 0.2),
+#         ratio=(0.3, 3.3)
+#     ),
+# ])
+
+# test_transform = t.Compose([
+#     t.Resize(256, interpolation=InterpolationMode.BILINEAR),
+#     t.CenterCrop(224),
+#     t.ToImage(),
+#     t.ToDtype(torch.float32, scale=True),
+#     t.Normalize(
+#         mean=[0.485, 0.456, 0.406],
+#         std=[0.229, 0.224, 0.225]
+#     ),
+# ])
+
+def get_id_dataset(train, transform):
+    return torchvision.datasets.CIFAR10('./mydatasets', train=train, transform=transform, download=True)
+    
+def get_ood_dataset(transform=default_transform, size=50_000):
+    return torchvision.datasets.FakeData(size = size, image_size=(3, 32, 32), transform=transform, num_classes=1)
+
+def setup_model():
+    model = torchvision.models.resnet50(weights=torchvision.models.ResNet50_Weights.IMAGENET1K_V1)
+    full_fine_tuning(model, output_classes=10)
+    return torch.compile(model.cuda())
 
 def main_train_model():
-    xtrain = torch.load('xtrain.pt')
-    ytrain = torch.load('ytrain.pt')
+    torch.set_float32_matmul_precision("high")
+    model = setup_model()
+    optim = torch.optim.SGD(model.parameters(), lr=1e-3, weight_decay=1e-2)
+    epochs = 100
+    patience = 0
+    test_acc_inc = 0.001
+    max_patience = 10
 
-    xtest = torch.load('xtest.pt')
-    ytest = torch.load('ytest.pt')
-
-    print(xtrain.shape, ytrain.shape)
-    print(xtest.shape, ytest.shape)
-    exit()
+    training = Training(
+        model=model,
+        optimizer=optim,
+        scheduler=torch.optim.lr_scheduler.CosineAnnealingLR(optim, epochs)
+    ).save_best_model('resnet50.pt')
 
     trainloader = DataLoader(
-        dataset=torch.utils.data.TensorDataset(xtrain, ytrain),
-        batch_size=512,
-        shuffle=False,
-        num_workers=10,
+        dataset=get_id_dataset(train=True, transform=train_transform),
+        batch_size=128,
+        shuffle=True,
+        num_workers=8,# todo: com è fatto state dict di model, optim e scheds
         pin_memory=True,
         persistent_workers=True
     )
 
     testloader = DataLoader(
-        dataset=torch.utils.data.TensorDataset(xtest, ytest),
-        batch_size=512,
+        dataset=get_id_dataset(train=False, transform=train_transform),
+        batch_size=128,
         shuffle=False,
-        num_workers=2,
+        num_workers=8,
         pin_memory=True,
         persistent_workers=True
     )
-    
-    epochs = 200
-    myloss = torch.nn.CrossEntropyLoss(reduction='sum')
-    optim = torch.optim.SGD(params=[p for p in model.parameters() if p.requires_grad], lr=1e-3)
-    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optim, T_max=epochs, eta_min=1e-7)
-    best_acc = 0.8
-    best_state_dict = None
 
-    try:
-        for e in range(epochs):
-            train_loss, train_acc = train(model, trainloader, optim, myloss)
-            test_loss, test_acc = eval(model, testloader, myloss)
-            scheduler.step()
-            if test_acc > best_acc:
-                best_acc = test_acc
-                best_state_dict = model.state_dict()
-
-            print(f'[{e}] L: {train_loss:.4f} / {test_loss:.4f} A: {train_acc*100:.1f} / {test_acc*100:.1f}')
-    finally:
-        if best_state_dict is not None:
-            torch.save(best_state_dict, f'resnet50.acc{int(best_acc*100)}.pt')
+    training.train(trainloader=trainloader, testloader=testloader, epochs=epochs, progress_bar=True)
 
 class XDataset(Dataset):
     def __init__(self, dataset):
@@ -290,4 +263,4 @@ def main():
         save_checkpoint('check.pt', model, optimizer)
 
 if __name__ == '__main__':
-    main_save_max_softmax()
+    main_train_model()

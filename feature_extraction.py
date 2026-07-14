@@ -5,7 +5,7 @@ from tqdm import tqdm
 
 from system_utils import get_max_workers
 from train_utils import Run
-from models import *
+from model_pipelines import *
 import torch
 import torchvision.transforms.v2 as t
 
@@ -27,9 +27,9 @@ def get_features(model, loader):
 def main_save_feature_extraction():
     checkpoint = torch.load('checkpoints/resnet50.acc95.pt')
     m = torchvision.models.resnet50(weights=None)
-    rework_model(m, last_layer='linear', output_classes=43, do_freeze_backbone=False)
+    full_fine_tuning(m, 43)
     m.load_state_dict(checkpoint['model'])
-    rework_model(m, last_layer='identity', do_freeze_backbone=True)
+    feature_extraction(m)
 
     img_size = 128
     my_transform = t.Compose([

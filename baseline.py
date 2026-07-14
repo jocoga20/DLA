@@ -3,8 +3,8 @@ import math
 import torch
 from tqdm import tqdm
 import wandb
-from models import *
-from train_utils import *
+from model_pipelines import *
+from Training import Training
 from utils import *
 from metrics import *
 
@@ -13,12 +13,12 @@ def main():
 	epochs = 500
 	trainloader, testloader = default_loaders(train_batch_size=2048, test_batch_size=128)
 	model = torchvision.models.resnet18()
-	rework_model(model, last_layer='linear', output_classes=num_classes)
+	
 	optimizer = torch.optim.SGD(params=[p for p in model.parameters() if p.requires_grad], lr=1e-5, momentum=0)
 
 	wandb.login(key='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')
 
-	myrun = Run(model=model, optimizer=optimizer, loss=torch.nn.CrossEntropyLoss(reduction='sum'))
+	myrun = Training(model=model, optimizer=optimizer)
 	wbrun = wandb.init(entity='jonathangallicoli', project='DLA', name='baseline', mode='online', dir='wandb_tmp')
 	scheduler=torch.optim.lr_scheduler.CosineAnnealingWarmRestarts(optimizer, T_0=20, T_mult=2)
 	best_acc = 0.39

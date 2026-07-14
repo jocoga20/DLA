@@ -3,7 +3,7 @@ import sys
 import torch
 from tqdm import tqdm
 import wandb
-from models import *
+from model_pipelines import *
 from train_utils import *
 from utils import *
 from metrics import *
@@ -14,7 +14,7 @@ def main():
     epochs = 100
     trainloader, testloader = default_loaders(train_batch_size=256, test_batch_size=128)
     model = torchvision.models.resnet50()
-    rework_model(model, last_layer='linear', output_classes=num_classes, do_freeze_backbone=False)
+    full_fine_tuning(model, num_classes)
     model = model.cuda()
     optimizer = torch.optim.SGD(params=model.parameters(), lr=1e-3, weight_decay=1e-3)
 

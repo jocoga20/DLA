@@ -1,7 +1,7 @@
 import torchvision
 import torch
 import torchvision.transforms.v2 as t
-from models import rework_model
+from model_pipelines import *
 from utils import gtsrb_mean, gtsrb_std
 from datasets import load_dataset
 from torchvision.models.detection.rpn import AnchorGenerator
@@ -27,7 +27,7 @@ def get_dataset():
 
 def prepare_backbone():
     m = torchvision.models.resnet50(weights=None)
-    rework_model(m, last_layer='linear', output_classes=43, do_freeze_backbone=False)
+    full_fine_tuning(m, 43)
     m.load_state_dict(torch.load('checkpoints/resnet50.acc95.pt')['model'])
     m = torch.nn.Sequential(*list(m.children())[:-2])
     m.out_channels = 2048       # 2048 if resnet50, 512 if resnet18

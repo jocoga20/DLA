@@ -3,7 +3,7 @@ from tqdm import tqdm
 
 from system_utils import get_max_workers
 from train_utils import Run
-from models import *
+from model_pipelines import *
 import torch
 import torchvision.transforms.v2 as t
 
@@ -53,7 +53,7 @@ def main_several_models():
     for m, w in zip(models, weights):
         print(m.__name__)
         m = m(weights=w.DEFAULT)
-        rework_model(m, last_layer='identity', do_freeze_backbone=True)
+        feature_extraction(m)
         my_transform = w.DEFAULT.transforms()
         bs = 512
 
