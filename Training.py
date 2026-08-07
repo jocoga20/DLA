@@ -13,6 +13,7 @@ class DummyScheduler(LRScheduler):
     def __init__(self): pass
     def state_dict(self): pass
     def load_state_dict(self, state_dict): pass
+    def step(self): pass
 
 class Training:
     def __init__(
@@ -32,11 +33,13 @@ class Training:
         self.checkpoint_file = checkpoint_file
         return self
 
-    def train_epoch(self, loader: DataLoader):
+    def train_epoch(self, loader: DataLoader, progress_bar: bool=False):
         epoch_loss = 0.
         corrects = 0
         size = 0
         self.model.train()
+        if progress_bar:
+            loader = tqdm(loader)
 
         for x, y in loader:
             size += x.shape[0]
@@ -53,11 +56,14 @@ class Training:
         return epoch_loss / size, corrects / size
     
     @no_grad()
-    def eval_epoch(self, loader: DataLoader):
+    def eval_epoch(self, loader: DataLoader, progress_bar: bool=False):
         epoch_loss = 0.
         corrects = 0
         size = 0
         self.model.train()
+
+        if progress_bar:
+            loader = tqdm(loader)
 
         for x, y in loader:
             size += x.shape[0]
@@ -79,28 +85,35 @@ class Training:
             epoch_iterator = tqdm(epoch_iterator)
         return epoch_iterator
     
-    def train(self, trainloader: DataLoader, testloader: DataLoader, epochs: int, progress_bar = False):
+    def train(self, trainloader: DataLoader, testloader: DataLoader, epochs: int, progress_bar = False, patience = float('inf')):
         epoch_iterator = self.get_epoch_iterator(epochs, progress_bar)
         checkpoint = None
         best_acc = 0
+        max_patience = patience
 
         try:
             for e in epoch_iterator:
                 train_loss, train_acc = self.train_epoch(trainloader)
                 test_loss, test_acc = self.eval_epoch(testloader)
                 self.scheduler.step()
-                if best_acc > test_acc:
+                self.log(e, train_loss, train_acc, test_loss, test_acc)
+                if test_acc > best_acc:
                     best_acc = test_acc
                     checkpoint = {
                         'model': self.model.state_dict(),
                         'optimizer': self.optimizer.state_dict(),
                         'scheduler': self.scheduler.state_dict()
                     }
-
-                self.log(e, train_loss, train_acc, test_loss, test_acc)
+                    patience = max_patience
+                elif patience <= 1:
+                    break
+                else:
+                    patience -= 1
         finally:
             if self.checkpoint_file:
+                print(f'Saving checkpoint @ "{self.checkpoint_file}"')
                 torch.save(checkpoint, self.checkpoint_file)
+        return self
             
 
     

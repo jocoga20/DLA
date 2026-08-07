@@ -3,6 +3,5 @@ wandb/
 mydatasets/
 checkpoints/
 .vscode/
-features/
-output/
-*.pt
+plots/
+logits/
