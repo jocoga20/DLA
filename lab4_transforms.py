@@ -7,17 +7,17 @@ imagenet_normalization = {
 }
 
 train_transform = t.Compose([
-    t.RandomCrop(32, padding=4),
+#    t.RandomCrop(32, padding=4),
     t.RandomHorizontalFlip(p=0.5),
     t.ToImage(),
     t.ToDtype(torch.float32, scale=True),
-    t.Normalize(**imagenet_normalization),
+#    t.Normalize(**imagenet_normalization),
 ])
 
 test_transform = t.Compose([
     t.ToImage(),
     t.ToDtype(torch.float32, scale=True),
-    t.Normalize(**imagenet_normalization),
+#    t.Normalize(**imagenet_normalization),
 ])
 
 default_transform = t.Compose([t.ToImage(), t.ToDtype(torch.float32, scale=True)])

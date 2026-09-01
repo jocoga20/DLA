@@ -1,3 +1,4 @@
+from dataclasses import dataclass
 from typing import Literal
 
 import torch
@@ -15,22 +16,33 @@ class DummyScheduler(LRScheduler):
     def load_state_dict(self, state_dict): pass
     def step(self): pass
 
-class Training:
+class Pipeline:
     def __init__(
         self,
         model: Module,
-        optimizer: Optimizer,
-        scheduler: LRScheduler = DummyScheduler(),
-        criterion: _Loss = CrossEntropyLoss(reduction='sum')
+        criterion: _Loss = None,
+        optimizer: Optimizer = None,
+        scheduler: LRScheduler = None
     ):
         self.model = model
-        self.optimizer = optimizer
-        self.scheduler = scheduler
         self.criterion = criterion
-        self.checkpoint_file = None
+        self.optimizer = optimizer
+        self.scheduler = scheduler or DummyScheduler()
+        self.checkpoint = None
 
-    def save_best_model(self, checkpoint_file):
-        self.checkpoint_file = checkpoint_file
+    def load_checkpoint(self, checkpoint_file: str):
+        print(f'Loading checkpoint "{checkpoint_file}"')
+        self.checkpoint = torch.load(checkpoint_file)
+        self.model.load_state_dict(self.checkpoint['model'])
+        if self.optimizer:
+            self.optimizer.load_state_dict(self.checkpoint['optimizer'])
+        if self.scheduler:
+            self.scheduler.load_state_dict(self.checkpoint['scheduler'])
+        return self
+
+    def save_checkpoint(self, checkpoint_file):
+        print(f'Saving checkpoint at "{checkpoint_file}"')
+        torch.save(self.checkpoint, checkpoint_file)
         return self
 
     def train_epoch(self, loader: DataLoader, progress_bar: bool=False):
@@ -60,7 +72,7 @@ class Training:
         epoch_loss = 0.
         corrects = 0
         size = 0
-        self.model.train()
+        self.model.eval()
 
         if progress_bar:
             loader = tqdm(loader)
@@ -75,19 +87,37 @@ class Training:
             corrects += (preds == y).sum().item()
         
         return epoch_loss / size, corrects / size
+
+    @torch.inference_mode()
+    def inference_logits(self, loader: DataLoader, progress_bar = False):
+        logits = []
+        self.model.eval()
+        if progress_bar:
+            loader = tqdm(loader)
+            
+        for x, _ in loader:
+            logits.append(self.model(x.cuda(non_blocking=True)).cpu())
+        return torch.cat(logits)
     
     def log(self, epoch, train_loss, train_acc, test_loss, test_acc):
-        print(f'[{epoch}] L: {train_loss:.4f} | {test_loss:.4f} A: {train_acc*100:.2f} | {test_acc*100:.2f}')
+        print(f'\n[{epoch}] L: {train_loss:.4f} | {test_loss:.4f} A: {train_acc*100:.2f} | {test_acc*100:.2f}')
 
     def get_epoch_iterator(self, epochs, progress_bar):
         epoch_iterator = range(epochs)
         if progress_bar:
             epoch_iterator = tqdm(epoch_iterator)
         return epoch_iterator
+
+    def get_checkpoint(self):
+        return {
+            'model': self.model.state_dict(),
+            'optimizer': self.optimizer.state_dict(),
+            'scheduler': self.scheduler.state_dict()
+        }
     
-    def train(self, trainloader: DataLoader, testloader: DataLoader, epochs: int, progress_bar = False, patience = float('inf')):
+    def train(self, trainloader: DataLoader, testloader: DataLoader, epochs: int, patience = float('inf'), progress_bar = False):
         epoch_iterator = self.get_epoch_iterator(epochs, progress_bar)
-        checkpoint = None
+        self.checkpoint = None
         best_acc = 0
         max_patience = patience
 
@@ -99,73 +129,13 @@ class Training:
                 self.log(e, train_loss, train_acc, test_loss, test_acc)
                 if test_acc > best_acc:
                     best_acc = test_acc
-                    checkpoint = {
-                        'model': self.model.state_dict(),
-                        'optimizer': self.optimizer.state_dict(),
-                        'scheduler': self.scheduler.state_dict()
-                    }
+                    self.checkpoint = self.get_checkpoint()
                     patience = max_patience
                 elif patience <= 1:
                     break
                 else:
                     patience -= 1
+        except KeyboardInterrupt:
+            return self
         finally:
-            if self.checkpoint_file:
-                print(f'Saving checkpoint @ "{self.checkpoint_file}"')
-                torch.save(checkpoint, self.checkpoint_file)
-        return self
-            
-
-    
-class AdversarialTraining(Training):
-    def __init__(self, model, optimizer, scheduler = DummyScheduler(), criterion = CrossEntropyLoss(reduction='sum')):
-        super().__init__(model, optimizer, scheduler, criterion)
-    
-    def train_epoch(self, loader: DataLoader):
-        epoch_loss = 0.
-        corrects = 0
-        size = 0
-        self.model.train()
-
-        for x, y in loader:
-            size += x.shape[0]
-            self.optimizer.zero_grad()
-            logits = self.model(x.cuda(non_blocking=True))
-            y = y.cuda(non_blocking=True)
-            loss = self.criterion(logits, y)
-            loss.backward()
-            self.optimizer.step()
-            epoch_loss += loss.item()
-            preds = logits.argmax(dim=1)
-            corrects += (preds == y).sum().item()
-
-
-def adv_train(model, loader, optimizer, criterion, adv_ratio = 0.5, epsilon = 4/255):
-    epoch_loss = 0.
-    corrects = 0
-    size = 0
-
-    model.train()
-
-    for x, y in loader:
-        x = x.cuda()
-        y = y.cuda()
-        batch_size = x.shape[0]
-        adv_idx = torch.randperm(batch_size, device=x.device)[:int(adv_ratio * batch_size)]
-        x_adv = x[adv_idx].detach().clone().requires_grad_(True)
-        y_adv = y[adv_idx]
-        logits = model(x_adv)
-        loss = criterion(logits, y_adv)
-        grad = torch.autograd.grad(loss, x_adv)[0]
-        x_adv = (x_adv + epsilon * grad.sign()).detach()
-        x[adv_idx] = x_adv
-        optimizer.zero_grad()
-        logits = model(x)
-        loss = criterion(logits, y)
-        loss.backward()
-        optimizer.step()
-        epoch_loss += loss.item()
-        corrects += (logits.argmax(1) == y).sum().item()
-        size += batch_size
-
-    return epoch_loss / size, corrects / size
+            return self
