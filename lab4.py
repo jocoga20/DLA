@@ -1,5 +1,8 @@
+from dataclasses import dataclass
+
 from matplotlib import pyplot as plt
 import numpy as np
+import optuna
 import pandas as pd
 import sklearn
 import torch
@@ -7,137 +10,109 @@ import torchvision
 from tqdm import tqdm
 
 from Pipeline import Pipeline
+from WarmupCosineLR import WarmupCosineLR
+from adversarial import test_epoch_adv, train_epoch_adv
 from lab4_datasets import get_cifar10, get_svhn
-from model_pipelines import full_fine_tuning
 from lab4_transforms import train_transform, test_transform
 from torch.utils.data import DataLoader
+from torch.nn import ModuleList, Module
 
-def get_vision_model(num_classes):
-    model = torchvision.models.resnet18(
-        weights=torchvision.models.ResNet18_Weights.DEFAULT,
-    )
+from model_pipelines import replace_last_linear
 
-    full_fine_tuning(model,output_classes=num_classes)
+def feature_extraction(model: Module, loader: DataLoader, xsave: str, ysave: str):
+	logits = Pipeline(model).inference_logits(loader, True)
+	torch.save(logits, xsave)
+	ys = []
+	for _, y in loader:
+		ys.append(y.cpu())
+	ys = torch.cat(ys)
+	torch.save(ys, ysave)
 
-    return model
+def main_adversarial_training():
+	seed = 0
+	g = set_seed(seed)
+	total_epochs = 100
+	torch.set_float32_matmul_precision('high')
+	model = get_vision_model(num_classes=10)
+	optim = torch.optim.SGD(
+		params=[p for p in model.parameters() if p.requires_grad],
+		lr=1e-3,
+		momentum=0.5,
+		nesterov=True,
+		weight_decay=1e-3
+	)
 
-def msp_score(logits: torch.Tensor):
-    return logits.softmax(dim=1).amax(dim=1)      # .amax = max().values
+	scheduler = torch.optim.lr_scheduler.CosineAnnealingWarmRestarts(
+		optim,
+		T_0=20,
+		T_mult=2,
+		eta_min=1e-5
+	)
 
-def energy_score(logits: torch.Tensor, temperature: float = 1):
-    return -temperature * logits.exp().sum(dim=1).log()
+	p = Pipeline(model, torch.nn.CrossEntropyLoss(reduction='sum'), optim, scheduler)
+	trainloader=DataLoader(
+		dataset=get_cifar10(True, train_transform),
+		batch_size=512,
+		shuffle=True,
+		pin_memory=True,
+		num_workers=12,
+		persistent_workers=True,
+		generator=g,
+		in_order=False
+	)
 
-def set_seed(seed):
-    torch.manual_seed(seed)     # generatori
-    torch.cuda.manual_seed_all(seed)    # tutte le gpu (anche se no ho una sola lol)
-    torch.backends.cudnn.deterministic = False
-    torch.backends.cudnn.benchmark = True
+	testloader=DataLoader(
+		dataset=get_cifar10(False, test_transform),
+		batch_size=512,
+		shuffle=False,
+		pin_memory=True,
+		in_order=False
+	)
 
-def train_vision_model(save_model_path: str, seed):
-    set_seed(seed)
-    torch.set_float32_matmul_precision('high')
-    model = get_vision_model(num_classes=10).cuda()
-    generator = torch.Generator()
-    generator.manual_seed(seed)
-    epochs = 100
-    optimizer = torch.optim.SGD(
-        [p for p in model.parameters() if p.requires_grad],
-        lr=1e-2,
-        weight_decay=1e-3,
-    )
+	loss_criterion = torch.nn.CrossEntropyLoss(reduction='sum')
 
-    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer=optimizer, T_max=epochs)
+	for e in range(total_epochs):
+		model.train()
+		train_loss, train_acc = train_epoch_adv(model, trainloader, optim, loss_criterion, epsilon=4/256, progress_bar=True)
+		scheduler.step()
 
-    Pipeline(model, torch.nn.CrossEntropyLoss(reduction='sum'), optimizer, scheduler)\
-        .train(trainloader=DataLoader(
-            dataset=get_cifar10(train=True, transform=train_transform),
-            batch_size=64,
-            shuffle=True,
-            num_workers=10,
-            pin_memory=True,
-            persistent_workers=True,
-            generator=generator
-        ), testloader=DataLoader(
-            dataset=get_cifar10(train=False, transform=test_transform),
-            batch_size=1024,
-            shuffle=False,
-            num_workers=2,
-            pin_memory=True,
-            persistent_workers=True
-        ), epochs=epochs, progress_bar=True, patience=5)\
-        .save_checkpoint(save_model_path)
-
-    
-
-def dataloader_to_scores(loader: DataLoader, model: torch.nn.Module, ood_score) -> torch.Tensor:
-    return torch.cat([ood_score(model, x.cuda()) for x, y in tqdm(loader)])
-
-def show_scores(id_scores: np.array, ood_scores: np.array):
-    plt.figure(figsize=(8, 5))
-
-    plt.hist(id_scores, bins=50, alpha=0.5, density=True, label="ID")
-    plt.hist(ood_scores, bins=50, alpha=0.5, density=True, label="OOD")
-
-    plt.xlabel("Confidence score")
-    plt.ylabel("Density")
-    plt.legend()
-    plt.grid(True)
-
-    plt.show()
-
-def get_logits(model, loader):
-    return torch.cat([model(x.cuda()) for x, y in loader])
-
-@torch.inference_mode()
-def to_logits(load_model_path: str):
-    model = get_vision_model(num_classes=10).cuda()
-    model.load_state_dict(torch.load(load_model_path)['model'])
-    model.eval()
-    test_size = 10_000
-
-    id_loader = DataLoader(
-        dataset=get_cifar10(train=False, transform=test_transform),
-        batch_size=1024,
-        shuffle=False,
-        num_workers=4,
-        pin_memory=True
-    )
-    torch.save(get_logits(model, id_loader).cpu(), 'id_logits.pt')
-
-    ood_loader = DataLoader(
-        dataset=get_svhn(size=test_size, transform=test_transform),
-        batch_size=1024,
-        shuffle=False,
-        num_workers=4,
-        pin_memory=True
-    )
-    torch.save(get_logits(model, ood_loader).cpu(), 'ood_logits.pt')
+		model.eval()
+		
+		test_loss, test_acc = p.eval_epoch(testloader, True)
+		test_adv_loss, test_adv_acc = test_epoch_adv(model, testloader, loss_criterion, epsilon=4 / 256, progress_bar=True)
+		print(f'[{e}] L: {train_loss:.4f} {test_loss:.4f} {test_adv_loss:.4f} | A (%): {train_acc*100:.2f} {test_acc*100:.2f} {test_adv_acc*100:.2f}')
+	
 
 def auroc_score(id_scores, ood_scores):
-    id = id_scores.numpy()
-    ood = ood_scores.numpy()
-    ytrue = np.concat([np.ones_like(id), np.zeros_like(ood)])
-    ypred = np.concat([id, ood])
-    return sklearn.metrics.roc_auc_score(ytrue, ypred)
+	id = id_scores.numpy()
+	ood = ood_scores.numpy()
+	ytrue = np.concat([np.ones_like(id), np.zeros_like(ood)])
+	ypred = np.concat([id, ood])
+	return sklearn.metrics.roc_auc_score(ytrue, ypred)
 
 def aupr_score(id_scores, ood_scores):
-    id = id_scores.numpy()
-    ood = ood_scores.numpy()
-    ytrue = np.concat([np.ones_like(id), np.zeros_like(ood)])
-    ypred = np.concat([id, ood])
-    return sklearn.metrics.average_precision_score(ytrue, ypred)
+	id = id_scores.numpy()
+	ood = ood_scores.numpy()
+	ytrue = np.concat([np.ones_like(id), np.zeros_like(ood)])
+	ypred = np.concat([id, ood])
+	return sklearn.metrics.average_precision_score(ytrue, ypred)
 
 def logits_to_score(id_logits_path: str, ood_logits_path: str):
-    id_logits = torch.load(id_logits_path)
-    ood_logits = torch.load(ood_logits_path)
-    print(auroc_score(id_logits, ood_logits),aupr_score(id_logits, ood_logits))
+	id_logits = torch.load(id_logits_path)
+	ood_logits = torch.load(ood_logits_path)
+	print(auroc_score(id_logits, ood_logits),aupr_score(id_logits, ood_logits))
 
-from PIL import Image
-from torch.nn import functional as f
 def to_image(x, name):
-    img = x[0].detach().cpu().clamp(0, 1)
-    img = (img * 255).byte()
-    img = img.permute(1, 2, 0)
-    pil_img = Image.fromarray(img.numpy())
-    print(f'Saving {name}')
-    pil_img.save(name)
+	from PIL import Image
+	from torch.nn import functional as f
+
+	img = x[0].detach().cpu().clamp(0, 1)
+	img = (img * 255).byte()
+	img = img.permute(1, 2, 0)
+	pil_img = Image.fromarray(img.numpy())
+	print(f'Saving {name}')
+	pil_img.save(name)
+
+
+if __name__ == '__main__':
+	train_model()

@@ -1,0 +1,33 @@
+[33m[W 2026-09-06 23:54:34,063][0m Trial 3 failed with parameters: {'lr': 2.2614038102528627e-05, 'wd': 0.000944474381186455, 'mm': 0.18376797659738853} because of the following error: KeyboardInterrupt().[0m
+Traceback (most recent call last):
+  File "/home/jonathan/myvenv/lib/python3.11/site-packages/optuna/study/_optimize.py", line 206, in _run_trial
+    value_or_values = func(trial)
+                      ^^^^^^^^^^^
+  File "/home/jonathan/Desktop/DLA/mainlab4.py", line 20, in evaluate_config
+    acc = train_vision_model(
+          ^^^^^^^^^^^^^^^^^^^
+  File "/home/jonathan/Desktop/DLA/lab4_training.py", line 54, in train_vision_model
+    model = get_vision_model(num_classes=10)
+            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/jonathan/Desktop/DLA/lab4_training.py", line 36, in get_vision_model
+    m = torchvision.models.resnet18(weights=w)
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/jonathan/myvenv/lib/python3.11/site-packages/torchvision/models/_utils.py", line 142, in wrapper
+    return fn(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^
+  File "/home/jonathan/myvenv/lib/python3.11/site-packages/torchvision/models/_utils.py", line 227, in inner_wrapper
+    return builder(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/jonathan/myvenv/lib/python3.11/site-packages/torchvision/models/resnet.py", line 705, in resnet18
+    return _resnet(BasicBlock, [2, 2, 2, 2], weights, progress, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/jonathan/myvenv/lib/python3.11/site-packages/torchvision/models/resnet.py", line 298, in _resnet
+    model = ResNet(block, layers, **kwargs)
+            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/jonathan/myvenv/lib/python3.11/site-packages/torchvision/models/resnet.py", line 210, in __init__
+    nn.init.kaiming_normal_(m.weight, mode="fan_out", nonlinearity="relu")
+  File "/home/jonathan/myvenv/lib/python3.11/site-packages/torch/nn/init.py", line 669, in kaiming_normal_
+    return tensor.normal_(0, std, generator=generator)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+KeyboardInterrupt
+[33m[W 2026-09-06 23:54:34,064][0m Trial 3 failed with value None.[0m

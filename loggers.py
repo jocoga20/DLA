@@ -1,29 +1,32 @@
 import wandb
 
-class Logger:
-	def log(self, step, data_dict): pass
-	def end_run(self): pass
+class NoLogger:
+    def log(self, step, data_dict): pass
+    def end_run(self): pass
 
-class WandbLogger(Logger):
-	def __init__(self, project, run_name=None, api_key='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'):
-		wandb.login(api_key, force=True)
-		self.run = wandb.init(project=project, name=run_name)
-	
-	def log(self, step, data_dict):
-		self.run.log(data=data_dict, step=step)
-	
-	def end_run(self):
-		self.run.finish()
+class WandbLogger(NoLogger):
+    def __init__(self, project: str, run_name:str = None, config_dict: dict = None):
+        self.run = wandb.init(project=project, name=run_name, config=config_dict)
+    
+    def log(self, step, data_dict):
+        self.run.log(data=data_dict, step=step)
+    
+    def end_run(self):
+        self.run.finish()
 
-class PrintLogger(Logger):
-	def log(self, step, data_dict):
-		print(f'[{step}] {data_dict}\n')
+class FormatLogger(NoLogger):
+    def format_string(step: int, data_dict: dict):
+        return f'{step} {data_dict}'
 
-class FileLogger(Logger):
-	def __init__(self, file_path):
-		super().__init__()
-		self.file_path = file_path
-	
-	def log(self, step, data_dict):
-		with open(self.file_path, 'a') as file:
-			file.write(f'[{step}] {data_dict}\n')
+class PrintLogger(FormatLogger):
+    def log(self, step, data_dict: dict):
+        print(super().format_string(step, data_dict))
+
+class FileLogger(FormatLogger):
+    def __init__(self, file_path):
+        super().__init__()
+        self.file_path = file_path
+    
+    def log(self, step: int, data_dict: dict):
+        with open(self.file_path, 'a') as file:
+            file.write(super().format_string(step, data_dict) + '\n')

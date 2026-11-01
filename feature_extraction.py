@@ -1,84 +1,37 @@
-from matplotlib import pyplot as plt
-from sklearn.metrics import confusion_matrix, ConfusionMatrixDisplay
-import torchvision
+from torch.nn import Module
 from tqdm import tqdm
-
-from system_utils import get_max_workers
-from train_utils import Run
-from model_pipelines import *
+from lab1_models import load_resnet18_feature_extraction, load_mobilenet_v3_small_feature_extraction, load_convnext_tiny_feature_extraction, load_dino_v2
+from torch.utils.data import DataLoader
 import torch
-import torchvision.transforms.v2 as t
-
-from utils import get_train, gtsrb_mean, gtsrb_std, gtsrb_train_size
+from lab1_datasets import get_gtsrb_full_train, get_gtsrb_test
+from torch.utils.data import Dataset
 
 @torch.inference_mode()
-def get_features(model, loader):
-    model.eval()
-    model = model.cuda()                  # both model and batch must be on the same device
-    features = []
-    ys = []
+def extract_features(model: Module, loader: DataLoader, path: str = None):
+    features = torch.cat([model(x.cuda(non_blocking=True)).cpu() for x, _ in loader]).cpu()
+    if path:
+        torch.save(features, path)
+    else:
+        return features
 
-    for x, y in tqdm(loader):
-        features.append(model(x.cuda()))
-        ys.append(y)
+def extract_all(names, models, trainset, testset, ds_name, p_bar = False):
+    ds_train = get_gtsrb_full_train()
+    ds_test = get_gtsrb_test()
+    nw = 6
+    bs = 64
+    dl_train = DataLoader(trainset, batch_size=bs, shuffle=False, pin_memory=True, num_workers=nw, persistent_workers=True)
+    dl_test = DataLoader(testset, batch_size=bs, shuffle=False, pin_memory=True, num_workers=nw, persistent_workers=True)
 
-    return torch.vstack(features), torch.concatenate(ys)
+    iterator = zip(names, models)
+    if p_bar:
+        iterator = tqdm(iterator)
 
-def main_save_feature_extraction():
-    checkpoint = torch.load('checkpoints/resnet50.acc95.pt')
-    m = torchvision.models.resnet50(weights=None)
-    full_fine_tuning(m, 43)
-    m.load_state_dict(checkpoint['model'])
-    feature_extraction(m)
+    for name, (transform, model) in iterator:
+        ds_train.transform = transform
+        ds_test.transform = transform
+        model.eval()
+        model = model.cuda()
+        extract_features(model, dl_train, f'features/{name}_{ds_name}_full_train.pt')
+        extract_features(model, dl_test, f'features/{name}_{ds_name}_test.pt')
 
-    img_size = 128
-    my_transform = t.Compose([
-        t.Resize((img_size, img_size)),
-        t.ToImage(),
-        t.ToDtype(torch.float32, scale=True),
-        t.Normalize(gtsrb_mean, gtsrb_std)
-    ])
-
-    loader = torch.utils.data.DataLoader(
-        dataset=get_train(transform=my_transform),
-        batch_size=256,                     # i can use bigger batches in test if it runs faster
-        shuffle=False,                      # not needed in inference
-        num_workers=12,
-        pin_memory=True,
-    )
-
-    X = get_features(m, loader)
-    torch.save(X, f'features/Xy.pt')
-
-def main_classification_head():
-    m = get_resnet(last_layer='linear')
-    optim = torch.optim.AdamW(params=[p for p in m.parameters() if p.requires_grad], lr=1e-4)
-    celoss = torch.nn.CrossEntropyLoss(reduction='sum')
-    
-    my_transform = t.Compose([
-        t.ToImage(), t.ToDtype(torch.float32, scale=True),
-        t.Normalize(mean=gtsrb_mean, std=gtsrb_std),
-        t.Resize(70),
-        t.RandomCrop((64, 64)),		
-    ])
-
-    loader = torch.utils.data.DataLoader(
-        dataset=get_train(transform=my_transform),
-        batch_size=128,                     # i can use bigger batches in test if it runs faster
-        shuffle=True,                      # not needed in inference
-        num_workers=get_max_workers(),
-        pin_memory=True,
-        persistent_workers=True
-    )
-
-    myrun = Run(model=m, optimizer=optim, loss=celoss)
-
-    for e in tqdm(range(99)):
-        myrun.train(loader=loader)
-
-    yp, ys = myrun.train(loader=loader)
-    cm = confusion_matrix(ys, yp, normalize='all') * 100
-    torch.save(cm, 'cm.pt')
-        
-if __name__ == '__main__':
-    main_save_feature_extraction()
+    del dl_train, dl_test

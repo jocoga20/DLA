@@ -1,7 +1,7 @@
 import optuna
 import torch
 import torchvision
-from torch.nn import Module
+from torch.nn import Module, Sequential
 from torch.utils.data import DataLoader, Dataset, TensorDataset
 from tqdm import tqdm
 from Pipeline import Pipeline
@@ -143,19 +143,15 @@ def prepare_efficientnet(model: Module):
 	model.classifier.requires_grad_()
 	return model.cuda()
 
-def fine_tuning(trial: optuna.Trial):
-	g = set_seed(42)
-	lock_level = trial.suggest_categorical('lock', [0, 1, 2, 3])
+def fine_tuning(lr, wd, epochs, patience):
 	model, inf_transform = get_mobilenet()
-	model = prepare_mobilenet(model, lock_level)
-
-	lr = trial.suggest_float('lr', 1e-4, 1e-2, log=True)
-	wd = trial.suggest_float('wd', 1e-6, 1e-2, log=True)
+	model = prepare_mobilenet(model, lock_level=0)
 	optim = torch.optim.SGD(params=[p for p in model.parameters() if p.requires_grad], lr=lr, weight_decay=wd)
 	epochs = 20
 	max_patience = 5
 	patience = 0
 	best_acc = 0
+	g = set_seed(42)
 	trainloader, testloader = fine_tuning_loaders(256, 512, inf_transform, g)
 	p = Pipeline(model, torch.nn.CrossEntropyLoss(), optim)
 	scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optim, epochs)
@@ -174,6 +170,12 @@ def fine_tuning(trial: optuna.Trial):
 	del model, trainloader, testloader
 	return best_acc
 
+def ft_obj_fun(trial: optuna.Trial):
+	lr = trial.suggest_float('lr', 1e-4, 1e-2, log=True)
+	wd = trial.suggest_float('wd', 1e-6, 1e-2, log=True)
+	return fine_tuning(lr, wd, 20, 5)
+	
+
 def query(first_features: Tensor, second_features: Tensor):
 	first_features = f.normalize(first_features, p=2, dim=1)
 	second_features = f.normalize(second_features, p=2, dim=1)
@@ -188,7 +190,7 @@ def rank_by_index(query_matrix: Tensor, k: int):
 def hyperparameter_search():
 	optuna.logging.set_verbosity(optuna.logging.WARN)
 	study = optuna.create_study(direction='maximize')
-	study.optimize(fine_tuning, n_trials=20, show_progress_bar=True, n_jobs=2)
+	study.optimize(ft_obj_fun, n_trials=20, show_progress_bar=True, n_jobs=2)
 	trials = sorted(
 		study.trials,
 		key=lambda t: t.value if t.value is not None else float('-inf'),
@@ -253,5 +255,30 @@ def nearest_mean_classifier(name):
 	accuracy = (ypred == test_labels).sum().item()
 	return accuracy / len(test_labels)
 
+def fusion():
+	model, inf_transform = get_resnet18()
+	model.requires_grad_(False)
+	model.fc = torch.nn.Linear(model.fc.in_features, 43)
+	model = model.cuda()
+	optim = torch.optim.AdamW(params=[p for p in model.parameters() if p.requires_grad], lr=5e-3, weight_decay=1e-4)
+	bs = 128
+	trainloader = DataLoader(
+		dataset=get_train(inf_transform),
+		batch_size=bs,
+		shuffle=True,
+		num_workers=10,
+		pin_memory=True,
+		persistent_workers=True
+	)
+	testloader = DataLoader(
+		dataset=get_test(inf_transform),
+		batch_size=bs * 2,
+		shuffle=False,
+		num_workers=2,
+		pin_memory=True,
+		persistent_workers=True
+	)
+	Pipeline(model, torch.nn.CrossEntropyLoss(reduction='sum'), optim).train(trainloader, testloader, 20, 5, True)
+
 if __name__ == '__main__':
-	hyperparameter_search()
+	fusion()

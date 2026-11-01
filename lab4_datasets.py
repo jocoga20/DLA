@@ -1,17 +1,26 @@
-import torchvision
+from typing import Literal
+import numpy as np
 import torch
+from torchvision.datasets import CIFAR10, CIFAR100
+from torch.utils.data import Subset
 
-def get_cifar10(train, transform):
-    return torchvision.datasets.CIFAR10('./mydatasets', train=train, transform=transform, download=True)
+class_names = np.array(['airplane', 'automobile', 'bird', 'cat', 'deer', 'dog', 'frog', 'horse', 'ship', 'truck'])
 
-def get_fakedata(transform, size):
-        return torchvision.datasets.FakeData(size = size, image_size=(3, 32, 32), transform=transform, num_classes=1)
+def cifar10_original_split(train: bool, transform=None):
+	return CIFAR10(root='./mydatasets', train=train, transform=transform, download=True)
 
-def get_svhn(transform, size : str | int = 'full', split='test'):
-    svhn = torchvision.datasets.SVHN(root='./mydatasets', split=split, download=True, transform=transform)
-    if size == 'full':
-        return svhn
-    
-    indices = torch.randperm(len(svhn))[:size]
-    return torch.utils.data.Subset(svhn, indices)
-    
+def cifar10_index_file(train: bool, index_file: str, transform=None):
+	return Subset(cifar10_original_split(train=train, transform=transform), torch.load(index_file).long().tolist())
+
+def get_cifar10(split: Literal['train', 'valid', 'test', 'trainval'], transform=None):
+	if split == 'trainval':
+		return cifar10_original_split(train=True, transform=transform)
+	elif split == 'test':
+		return cifar10_original_split(train=False, transform=transform)
+	elif split == 'train':
+		return cifar10_index_file(train=True, transform=transform, index_file='lab4_res/train_indices.pt')
+	else:
+		return cifar10_index_file(train=True, transform=transform, index_file='lab4_res/valid_indices.pt')
+
+def get_cifar100_ood(transform=None):
+	return Subset(CIFAR100(root='./mydatasets', train=True, transform=transform, download=True), torch.load('lab4_res/ood_indices.pt').long().tolist())

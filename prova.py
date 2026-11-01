@@ -1,104 +1,32 @@
-from Pipeline import Pipeline
-import torch, torchvision
-import torchvision.transforms.v2 as t
+
+from backbones import ConvNextTiny, DinoV2, MobileNetV3Small, Resnet18
+from lab1_datasets import get_gtsrb_full_train, get_gtsrb_test
 from torch.utils.data import DataLoader
-from torch.nn import Module
 
-from lab1 import set_seed
+def feature_extraction(
+        batch_size: int,
+        num_workers: int,
+    ):
+    backbones = [Resnet18, MobileNetV3Small, ConvNextTiny, DinoV2]
+    for i, b in enumerate(backbones):
+        b = b()
+        for ds_name, ds_constructor in [('train', get_gtsrb_full_train), ('test', get_gtsrb_test)]:
+            dl = DataLoader(
+                dataset=ds_constructor(b.get_transform()),
+                batch_size=batch_size,
+                shuffle=False,
+                num_workers=num_workers,
+                pin_memory=True,
+                persistent_workers=True
+            )
+            b.feature_extraction(
+                loader=dl,
+                x_file=f'features/gtrsb_{b.name}_{ds_name}.pt',
+                y_file=f'labels/gtrsb_{ds_name}.pt' if i == 0 else None,
+                progress_bar=True
+            )
+            del dl
 
-def get_cifar(is_train_split, transform):
-	return torchvision.datasets.CIFAR10('./mydatasets', train=is_train_split, transform=transform, download=True)
+        del b
 
-def cifar_train(transform): return get_cifar(True, transform)
-def cifar_test(transform): return get_cifar(False, transform)
-
-def sgd_from_model(model: Module):
-	return torch.optim.SGD(params=[p for p in model.parameters() if p.requires_grad], lr=1e-1)
-
-def scheduler_from_optim(optim):
-	return torch.optim.lr_scheduler.CosineAnnealingLR(optim, 20)
-
-def main():
-	g = set_seed()
-	train_transform = t.Compose([
-		t.RandomHorizontalFlip(),
-		t.ToImage(),
-		t.ToDtype(torch.float32, scale=True),
-		t.Normalize(mean=[0.5]*3, std=[0.5]*3)
-	])
-	test_transform = t.Compose([
-		t.ToImage(),
-		t.ToDtype(torch.float32, scale=True),
-		t.Normalize(mean=[0.5]*3, std=[0.5]*3)
-	])
-
-	model = torchvision.models.resnet18(weights=None, num_classes=10)
-	model.requires_grad_(False)
-	model.conv1.requires_grad_()
-	model.bn1.requires_grad_()
-	model = model.cuda()
-	optim = sgd_from_model(model)
-	bs = 512
-	epochs = 20
-
-	trainloader = DataLoader(
-		dataset=cifar_train(train_transform),
-		batch_size=bs,
-		shuffle=True,
-		pin_memory=True,
-		persistent_workers=True,
-		num_workers=10,
-		generator=g
-	)
-
-	testloader = DataLoader(
-		dataset=cifar_test(test_transform),
-		batch_size=bs*2,
-		shuffle=False,
-		pin_memory=True,
-		persistent_workers=True,
-		num_workers=2
-	)
-	p = Pipeline(model, torch.nn.CrossEntropyLoss(), optim, scheduler_from_optim(optim))
-	print('pre layer')
-	p.train(trainloader, testloader, epochs, 5, True)
-
-	print('layer 1')
-	model.requires_grad_(False)
-	model.layer1.requires_grad_()
-	p.optimizer = sgd_from_model(model)
-	p.scheduler = scheduler_from_optim(p.optimizer)
-	p.train(trainloader, testloader, epochs, 5, True)
-	
-	print('layer 2')
-	model.requires_grad_(False)
-	model.layer2.requires_grad_()
-	p.optimizer = sgd_from_model(model)
-	p.scheduler = scheduler_from_optim(p.optimizer)
-	p.train(trainloader, testloader, epochs, 5, True)
-
-	
-	print('layer 3')
-	model.requires_grad_(False)
-	model.layer3.requires_grad_()
-	p.optimizer = sgd_from_model(model)
-	p.scheduler = scheduler_from_optim(p.optimizer)
-	p.train(trainloader, testloader, epochs, 5, True)
-
-	print('layer 4')
-	model.requires_grad_(False)
-	model.layer4.requires_grad_()
-	p.optimizer = sgd_from_model(model)
-	p.scheduler = scheduler_from_optim(p.optimizer)
-	p.train(trainloader, testloader, epochs, 5, True)
-
-	print('cls')
-	model.requires_grad_(False)
-	model.fc.requires_grad_()
-	p.optimizer = sgd_from_model(model)
-	p.scheduler = scheduler_from_optim(p.optimizer)
-	p.train(trainloader, testloader, epochs, 5, True)
-	
-
-if __name__ == '__main__':
-	main()
+feature_extraction(batch_size=64, num_workers=4)

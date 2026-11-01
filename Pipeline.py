@@ -1,6 +1,7 @@
 from dataclasses import dataclass
 from typing import Literal
 
+from matplotlib import pyplot as plt
 import torch
 from torch.nn import CrossEntropyLoss, Module
 from torch.optim import Optimizer
@@ -9,6 +10,8 @@ from torch.utils.data import DataLoader
 from torch.nn.modules.loss import _Loss
 from torch import no_grad
 from tqdm import tqdm
+import wandb
+from loggers import NoLogger
 
 class DummyScheduler(LRScheduler):
     def __init__(self): pass
@@ -22,12 +25,14 @@ class Pipeline:
         model: Module,
         criterion: _Loss = None,
         optimizer: Optimizer = None,
-        scheduler: LRScheduler = None
+        scheduler: LRScheduler = None,
+        logger: NoLogger = None
     ):
         self.model = model
         self.criterion = criterion
         self.optimizer = optimizer
         self.scheduler = scheduler or DummyScheduler()
+        self.logger = logger or NoLogger()
         self.checkpoint = None
 
     def load_checkpoint(self, checkpoint_file: str):
@@ -49,7 +54,6 @@ class Pipeline:
         epoch_loss = 0.
         corrects = 0
         size = 0
-        self.model.train()
         if progress_bar:
             loader = tqdm(loader)
 
@@ -72,7 +76,6 @@ class Pipeline:
         epoch_loss = 0.
         corrects = 0
         size = 0
-        self.model.eval()
 
         if progress_bar:
             loader = tqdm(loader)
@@ -98,9 +101,6 @@ class Pipeline:
         for x, _ in loader:
             logits.append(self.model(x.cuda(non_blocking=True)).cpu())
         return torch.cat(logits)
-    
-    def log(self, epoch, train_loss, train_acc, test_loss, test_acc):
-        print(f'\n[{epoch}] L: {train_loss:.4f} | {test_loss:.4f} A: {train_acc*100:.2f} | {test_acc*100:.2f}')
 
     def get_epoch_iterator(self, epochs, progress_bar):
         epoch_iterator = range(epochs)
@@ -114,19 +114,59 @@ class Pipeline:
             'optimizer': self.optimizer.state_dict(),
             'scheduler': self.scheduler.state_dict()
         }
+
+    def confusion_matrix(
+        self,
+        loader: DataLoader,
+        img_path: str = None
+    ):
+        from sklearn.metrics import confusion_matrix, ConfusionMatrixDisplay
+        ytrue = []
+        ypred = []
+
+        for x, y in tqdm(loader):
+            ytrue.append(y)
+            with torch.no_grad():
+                ypred.append(torch.softmax(self.model(x.cuda(non_blocking=True)), dim=1).argmax(dim=1).cpu())
+        ytrue = torch.cat(ytrue)
+        ypred = torch.cat(ypred)
+
+        disp = ConfusionMatrixDisplay(confusion_matrix(ytrue, ypred))
+        disp.plot()
+        if img_path:
+            plt.savefig(img_path, dpi=300, bbox_inches='tight')
+        else:
+            plt.show()
+        return self
     
-    def train(self, trainloader: DataLoader, testloader: DataLoader, epochs: int, patience = float('inf'), progress_bar = False):
+    def train(self,
+        trainloader: DataLoader,
+        testloader: DataLoader,
+        epochs: int,
+        patience: int = None,
+        progress_bar:bool = False
+    ):
         epoch_iterator = self.get_epoch_iterator(epochs, progress_bar)
         self.checkpoint = None
         best_acc = 0
+        patience = float('inf') or patience
         max_patience = patience
-
+        
         try:
             for e in epoch_iterator:
+                self.model.train()
                 train_loss, train_acc = self.train_epoch(trainloader)
-                test_loss, test_acc = self.eval_epoch(testloader)
                 self.scheduler.step()
-                self.log(e, train_loss, train_acc, test_loss, test_acc)
+                self.model.eval()
+                test_loss, test_acc = self.eval_epoch(testloader)
+                
+                self.logger.log(e, {
+                    'train_loss': train_loss,
+                    'train_acc': train_acc,
+                    'valid_loss': test_loss,
+                    'valid_acc': test_acc
+                })
+                
                 if test_acc > best_acc:
                     best_acc = test_acc
                     self.checkpoint = self.get_checkpoint()
@@ -135,7 +175,6 @@ class Pipeline:
                     break
                 else:
                     patience -= 1
-        except KeyboardInterrupt:
-            return self
         finally:
+            self.logger.end_run()
             return self
