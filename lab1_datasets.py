@@ -52,9 +52,3 @@ def se(ds, n = False):
 def rel_freq(ds):
     x = np.bincount(extract_labels(ds)).astype(float)
     return x / x.sum()
-
-def gtsrb_full_train_labels():
-    return torch.load('labels/gtsrb_full_train.pt')
-
-def gtsrb_test_labels():
-    return torch.load('labels/gtsrb_test.pt')

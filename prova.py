@@ -1,32 +1,29 @@
-
-from backbones import ConvNextTiny, DinoV2, MobileNetV3Small, Resnet18
+from lab1_plots import plot_labels
 from lab1_datasets import get_gtsrb_full_train, get_gtsrb_test
-from torch.utils.data import DataLoader
+import numpy as np
+from torch.utils.data import Dataset
+from tqdm import tqdm
 
-def feature_extraction(
-        batch_size: int,
-        num_workers: int,
-    ):
-    backbones = [Resnet18, MobileNetV3Small, ConvNextTiny, DinoV2]
-    for i, b in enumerate(backbones):
-        b = b()
-        for ds_name, ds_constructor in [('train', get_gtsrb_full_train), ('test', get_gtsrb_test)]:
-            dl = DataLoader(
-                dataset=ds_constructor(b.get_transform()),
-                batch_size=batch_size,
-                shuffle=False,
-                num_workers=num_workers,
-                pin_memory=True,
-                persistent_workers=True
-            )
-            b.feature_extraction(
-                loader=dl,
-                x_file=f'features/gtrsb_{b.name}_{ds_name}.pt',
-                y_file=f'labels/gtrsb_{ds_name}.pt' if i == 0 else None,
-                progress_bar=True
-            )
-            del dl
+def get_labels_from_dataset(dataset: Dataset):
+    return [y for _, y in tqdm(dataset)]
 
-        del b
+def plot_and_relative_balance():
+    print('co')
+    train_labels = get_labels_from_dataset(get_gtsrb_full_train())
+    print('coc')
+    test_labels = get_labels_from_dataset(get_gtsrb_test())
+    plot_labels(train_labels, test_labels, 'labels.png')
 
-feature_extraction(batch_size=64, num_workers=4)
+    train_labels = np.bincount(train_labels)
+    test_labels = np.bincount(test_labels)
+
+    max_class_train = max(train_labels)
+    min_class_train = min(train_labels)
+
+    max_class_test = max(test_labels)
+    min_class_test = min(test_labels)
+
+    print(f'Train: {max_class_train / min_class_train}')
+    print(f'Test: {max_class_test / min_class_test}')
+
+plot_and_relative_balance()
