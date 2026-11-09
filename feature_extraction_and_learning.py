@@ -6,6 +6,7 @@ from loggers import PrintLogger, WandbLogger
 from train_utils import train
 from torch.nn import LazyLinear
 from lab1_datasets import get_gtsrb_full_train, get_gtsrb_test
+from torch import functional as f
 
 def features_path(backbone_name: str, dataset_name: str):
     return f'features/{backbone_name}_{dataset_name}.pt'
@@ -31,7 +32,9 @@ def feature_extraction(backbones: list[Backbone], datasets_with_name: list[tuple
         save_label = False
 
 def feature_dataset(features_path: str, labels_path: str):
-    return TensorDataset(torch.load(features_path), torch.load(labels_path))
+    x = torch.load(features_path)
+    x /= x.norm(p=2, dim=1, keepdim=True)
+    return TensorDataset(x, torch.load(labels_path))
 
 def linear_feature_learning(train_features_path, train_labels_path, test_features_path, test_labels_path):
     train_dl = DataLoader(
@@ -53,7 +56,7 @@ def linear_feature_learning(train_features_path, train_labels_path, test_feature
     )
 
     m = LazyLinear(out_features=43, device='cuda')
-    o = torch.optim.SGD(params=m.parameters(), lr=1e-1)
+    o = torch.optim.SGD(params=m.parameters(), lr=1e-3)
     train(
         model=m,
         optimizer=o,
@@ -61,7 +64,7 @@ def linear_feature_learning(train_features_path, train_labels_path, test_feature
         eval_loader=test_dl,
         epochs=100,
         max_patience=5,
-        logger=WandbLogger(project='DLA', entity='gallicolijonathan-unifi', run_name='gtrsb linear probing')
+        logger=WandbLogger(project='DLA', entity='marcopaglio-universit-di-firenze', run_name='gtrsb linear probing')
     )
 
 def main():
