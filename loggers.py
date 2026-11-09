@@ -5,8 +5,8 @@ class NoLogger:
     def end_run(self): pass
 
 class WandbLogger(NoLogger):
-    def __init__(self, project: str, run_name:str = None, config_dict: dict = None):
-        self.run = wandb.init(project=project, name=run_name, config=config_dict)
+    def __init__(self, project: str, run_name:str = None, entity:str = None, config_dict: dict = None):
+        self.run = wandb.init(project=project, name=run_name, entity=entity, config=config_dict)
     
     def log(self, step, data_dict):
         self.run.log(data=data_dict, step=step)
@@ -15,7 +15,7 @@ class WandbLogger(NoLogger):
         self.run.finish()
 
 class FormatLogger(NoLogger):
-    def format_string(step: int, data_dict: dict):
+    def format_string(self, step: int, data_dict: dict):
         return f'{step} {data_dict}'
 
 class PrintLogger(FormatLogger):

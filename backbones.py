@@ -28,7 +28,7 @@ class Backbone:
         ys = []
 
         if progress_bar:
-            loader = tqdm(loader, desc=self.name)
+            loader = tqdm(loader, desc=self.__str__())
 
         for x, y in loader:
             xs.append(self.model(x.cuda()).cpu())
@@ -62,8 +62,8 @@ class Resnet18(Resnet):
     def __init__(self):
         super().__init__(models.resnet18, models.ResNet18_Weights.DEFAULT)
 
-    @staticmethod
-    def name(): return 'resnet18'
+    def __str__(self): return 'resnet18'
+
 
 class MobileNetV3Small(TorchvisionModel):
     def __init__(self):
@@ -73,8 +73,7 @@ class MobileNetV3Small(TorchvisionModel):
         super().config_for_feature_extraction()
         self.model.classifier[3] = Identity()
 
-    @staticmethod
-    def name(): return 'mobilenet_v3_small'
+    def __str__(self): return 'mobilenet_v3_small'
 
 class ConvNextTiny(TorchvisionModel):
     def __init__(self):
@@ -83,9 +82,8 @@ class ConvNextTiny(TorchvisionModel):
     def config_for_feature_extraction(self):
         super().config_for_feature_extraction()
         self.model.classifier[2] = Identity()
-
-    @staticmethod
-    def name(): return 'convnext_tiny'
+    
+    def __str__(self): return 'convnext_tiny'
 
 class DinoV2(Backbone):
     def __init__(self):
@@ -103,5 +101,4 @@ class DinoV2(Backbone):
     def get_transform(self):
         return self.transform
 
-    @staticmethod
-    def name(): return 'dino_v2'
+    def __str__(self): return 'dino_v2'

@@ -5,10 +5,9 @@ from torch.nn import CrossEntropyLoss, Module
 from torch.utils.data import DataLoader
 from torch.nn.modules.loss import _Loss
 from torch.optim import Optimizer
-from tqdm import tqdm
 from torch.optim.lr_scheduler import LRScheduler
+from tqdm import tqdm
 
-from TrainConfig import TrainConfig
 from loggers import NoLogger
 
 class DummyScheduler(LRScheduler):
@@ -81,7 +80,8 @@ def train(
     optimizer: Optimizer,
     train_loader: DataLoader,
     eval_loader: DataLoader,
-    config: TrainConfig,
+    epochs: int,
+    max_patience: int,
     scheduler: LRScheduler = None,
     loss_rule: _Loss = None,
     logger: NoLogger = None,
@@ -91,7 +91,7 @@ def train(
     scheduler = scheduler or DummyScheduler()
     logger = logger or NoLogger()
 
-    epoch_iterator = range(config.epochs)
+    epoch_iterator = range(epochs)
     if progress_bars == 'epoch':
         epoch_iterator = tqdm(epoch_iterator)
 
@@ -114,7 +114,6 @@ def train(
             patience = 0
         else:
             patience += 1
-            if config.patience is not None and patience >= config.patience:
+            if max_patience is not None and patience >= max_patience:
                 break
-        print(patience)
     return best_acc

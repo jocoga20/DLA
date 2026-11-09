@@ -1,0 +1,30 @@
+wandb: Loading settings from /home/jonathan/.config/wandb/settings
+wandb: [wandb.login()] Loaded credentials for https://api.wandb.ai from /home/jonathan/.netrc.
+wandb: Currently logged in as: gallicolijonathan to https://api.wandb.ai. Use `wandb login --relogin` to force relogin
+wandb: setting up run x3927lpw
+wandb: ERROR the provided API key cannot access this resource, check credentials
+Traceback (most recent call last):
+  File "/home/jonathan/DLA/feature_extraction_and_learning.py", line 72, in <module>
+    main()
+    ~~~~^^
+  File "/home/jonathan/DLA/feature_extraction_and_learning.py", line 68, in main
+    linear_feature_learning('features/convnext_tiny_gtsrb_train.pt', 'labels/gtsrb_train.pt',
+    ~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+                            'features/convnext_tiny_gtsrb_test.pt', 'labels/gtsrb_test.pt')
+                            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/jonathan/DLA/feature_extraction_and_learning.py", line 64, in linear_feature_learning
+    logger=WandbLogger(project='DLA', entity='gallicolijonathan-unifi', run_name='gtrsb linear probing')
+  File "/home/jonathan/DLA/loggers.py", line 9, in __init__
+    self.run = wandb.init(project=project, name=run_name, entity=entity, config=config_dict)
+               ~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/jonathan/myvenv/lib/python3.14/site-packages/wandb/sdk/wandb_init.py", line 1558, in init
+    telemetry_recorder.reraise(e)
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~^^^
+  File "/home/jonathan/myvenv/lib/python3.14/site-packages/wandb/analytics/opentelemetry/opentelemetry_proxy.py", line 538, in reraise
+    raise exc
+  File "/home/jonathan/myvenv/lib/python3.14/site-packages/wandb/sdk/wandb_init.py", line 1536, in init
+    run = wi.init(run_settings, run_config, run_printer)
+  File "/home/jonathan/myvenv/lib/python3.14/site-packages/wandb/sdk/wandb_init.py", line 966, in init
+    raise error
+wandb.errors.errors.CommError: the provided API key cannot access this resource, check credentials
+shutdown can only be called once
