@@ -131,7 +131,7 @@ MobileNetV3(
           (scale_activation): Hardsigmoid()
         )
         (3): Conv2dNormActivation(
-          (0): Conv2d(240, 40, kernel_size=(1, 1), stride=(1, 1), bias=False)
+          (0): Conv2d(240, 40, kernel_size=(1, 1), stridshutdown can only be called oncee=(1, 1), bias=False)
           (1): BatchNorm2d(40, eps=0.001, momentum=0.01, affine=True, bias=True, track_running_stats=True)
         )
       )

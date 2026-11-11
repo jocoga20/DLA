@@ -1,12 +1,24 @@
 import wandb
 
 class NoLogger:
+    def __enter__(self): pass
+    def __exit__(self, exc_type, exc, tb): pass
     def log(self, step, data_dict): pass
-    def end_run(self): pass
 
 class WandbLogger(NoLogger):
-    def __init__(self, project: str, run_name:str = None, entity:str = None, config_dict: dict = None):
-        self.run = wandb.init(project=project, name=run_name, entity=entity, config=config_dict)
+    def __init__(self, project: str, run_name: str = None, entity: str = None, config_dict: dict = None):
+        self.project = project
+        self.run_name = run_name
+        self.entity = entity
+        self.config_dict = config_dict
+
+    def __enter__(self):
+        self.run = wandb.init(self.entity, self.project, name=self.run_name, config=self.config_dict)
+        return self
+
+    def __exit__(self, exc_type, exc, tb):
+        self.run.finish(exit_code=1 if exc_type else 0)
+        return False
     
     def log(self, step, data_dict):
         self.run.log(data=data_dict, step=step)

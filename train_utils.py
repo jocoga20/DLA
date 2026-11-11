@@ -8,6 +8,8 @@ from torch.optim import Optimizer
 from torch.optim.lr_scheduler import LRScheduler
 from tqdm import tqdm
 
+from sklearn.metrics import balanced_accuracy_score
+import numpy as np
 from loggers import NoLogger
 
 class DummyScheduler(LRScheduler):
@@ -16,13 +18,14 @@ class DummyScheduler(LRScheduler):
     def load_state_dict(self, state_dict): pass
     def state_dict(self): return dict({})
 
+
 def train_epoch(
     model: Module,
     loader: DataLoader,
     optimizer: Optimizer,
     loss_rule: _Loss = None,
     progress_bar: bool = False
-):
+) -> tuple[float, float, float]:
     total_loss = 0.
     corrects = 0
     size = 0
@@ -30,6 +33,9 @@ def train_epoch(
 
     if progress_bar:
         loader = tqdm(loader)
+
+    all_preds = []
+    all_targets = []
 
     model.train()
 
@@ -42,10 +48,19 @@ def train_epoch(
         loss.backward()
         optimizer.step()
         total_loss += loss.item()
+
         preds = logits.argmax(dim=1)
         corrects += (preds == y).sum().item()
-    
-    return total_loss / size, corrects / size
+
+        # Raccolta su CPU per il calcolo finale con sklearn
+        all_preds.append(preds.detach().cpu())
+        all_targets.append(y.detach().cpu())
+
+    y_pred = torch.cat(all_preds).numpy()
+    y_true = torch.cat(all_targets).numpy()
+    balanced_acc = balanced_accuracy_score(y_true, y_pred)
+
+    return total_loss / size, corrects / size, balanced_acc
 
 @torch.no_grad()
 def eval_epoch(
@@ -53,7 +68,7 @@ def eval_epoch(
     loader: DataLoader,
     loss_rule: _Loss = None,
     progress_bar: bool = False
-):
+) -> tuple[float, float, float]:
     total_loss = 0.
     corrects = 0
     size = 0
@@ -61,6 +76,9 @@ def eval_epoch(
 
     if progress_bar:
         loader = tqdm(loader)
+
+    all_preds = []
+    all_targets = []
 
     model.eval()
 
@@ -70,10 +88,18 @@ def eval_epoch(
         y = y.cuda(non_blocking=True)
         loss = loss_rule(logits, y)
         total_loss += loss.item()
+
         preds = logits.argmax(dim=1)
         corrects += (preds == y).sum().item()
 
-    return total_loss / size, corrects / size
+        all_preds.append(preds.cpu())
+        all_targets.append(y.cpu())
+
+    y_pred = torch.cat(all_preds).numpy()
+    y_true = torch.cat(all_targets).numpy()
+    balanced_acc = balanced_accuracy_score(y_true, y_pred)
+
+    return total_loss / size, corrects / size, balanced_acc
 
 def train(
     model: Module,
@@ -101,19 +127,27 @@ def train(
     best_loss = float('inf')
     best_acc = -1
 
-    for e in epoch_iterator:
-        train_loss, train_acc = train_epoch(model, train_loader, optimizer, loss_rule, progress_bar=pb_train)
-        eval_loss, eval_acc = eval_epoch(model, eval_loader, loss_rule, progress_bar=pb_eval)
-        logger.log(step=e, data_dict={'train_loss': train_loss, 'eval_loss': eval_loss, 'train_acc': train_acc, 'eval_acc': eval_acc})
-        scheduler.step()
+    with logger:
+        for e in epoch_iterator:
+            train_loss, train_acc, train_bal_acc = train_epoch(model, train_loader, optimizer, loss_rule, progress_bar=pb_train)
+            eval_loss, eval_acc, eval_bal_acc = eval_epoch(model, eval_loader, loss_rule, progress_bar=pb_eval)
+            logger.log(step=e, data_dict={
+                'train_loss': train_loss,
+                'eval_loss': eval_loss,
+                'train_acc': train_acc,
+                'eval_acc': eval_acc,
+                'train_bacc': train_bal_acc,
+                'eval_bacc': eval_bal_acc
+            })
+            scheduler.step()
 
-        if eval_acc > best_acc:
-            best_acc = eval_acc
+            if eval_acc > best_acc:
+                best_acc = eval_acc
 
-        if eval_loss < best_loss:
-            patience = 0
-        else:
-            patience += 1
-            if max_patience is not None and patience >= max_patience:
-                break
+            if eval_loss < best_loss:
+                patience = 0
+            else:
+                patience += 1
+                if max_patience is not None and patience >= max_patience:
+                    break
     return best_acc

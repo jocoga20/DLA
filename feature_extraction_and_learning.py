@@ -18,6 +18,7 @@ def feature_extraction(backbones: list[Backbone], datasets_with_name: list[tuple
     save_label = True
     
     for b in backbones:
+        b.config_for_feature_extraction()
         for dataset_name, dataset in datasets_with_name:
             dl = DataLoader(dataset, batch_size=64, shuffle=False, num_workers=4, pin_memory=True)
             dl.dataset.transform = b.get_transform()
@@ -31,32 +32,35 @@ def feature_extraction(backbones: list[Backbone], datasets_with_name: list[tuple
 
         save_label = False
 
-def feature_dataset(features_path: str, labels_path: str):
+def feature_dataset(features_path: str, labels_path: str, normalize: bool = True):
     x = torch.load(features_path)
-    x /= x.norm(p=2, dim=1, keepdim=True)
+    if normalize:
+        x /= x.norm(p=2, dim=1, keepdim=True)
     return TensorDataset(x, torch.load(labels_path))
 
-def linear_feature_learning(train_features_path, train_labels_path, test_features_path, test_labels_path):
+def linear_feature_learning(train_features_path, train_labels_path, test_features_path, test_labels_path, run_name):
     train_dl = DataLoader(
         dataset=feature_dataset(train_features_path, train_labels_path),
-        batch_size=32,
+        batch_size=128,
         shuffle=True,
         num_workers=4,
         pin_memory=True,
-        persistent_workers=True
+        persistent_workers=True,
+        prefetch_factor=8
     )
 
     test_dl = DataLoader(
         dataset=feature_dataset(test_features_path, test_labels_path),
-        batch_size=32,
+        batch_size=128,
         shuffle=False,
         num_workers=4,
         pin_memory=True,
-        persistent_workers=True
+        persistent_workers=True,
+        prefetch_factor=4
     )
 
     m = LazyLinear(out_features=43, device='cuda')
-    o = torch.optim.SGD(params=m.parameters(), lr=1e-3)
+    o = torch.optim.AdamW(params=m.parameters(), lr=1e-4, weight_decay=1e-2)
     train(
         model=m,
         optimizer=o,
@@ -64,12 +68,23 @@ def linear_feature_learning(train_features_path, train_labels_path, test_feature
         eval_loader=test_dl,
         epochs=100,
         max_patience=5,
-        logger=WandbLogger(project='DLA', entity='marcopaglio-universit-di-firenze', run_name='gtrsb linear probing')
+        logger=WandbLogger(project='DLA', entity='marcopaglio-universit-di-firenze', run_name=run_name),
+        progress_bars='epoch'
     )
 
 def main():
     linear_feature_learning('features/convnext_tiny_gtsrb_train.pt', 'labels/gtsrb_train.pt',
-                            'features/convnext_tiny_gtsrb_test.pt', 'labels/gtsrb_test.pt')
+                           'features/convnext_tiny_gtsrb_test.pt', 'labels/gtsrb_test.pt', 'convnext')
+
+    linear_feature_learning('features/dino_v2_gtsrb_train.pt', 'labels/gtsrb_train.pt',
+                            'features/dino_v2_gtsrb_test.pt', 'labels/gtsrb_test.pt', 'dino')
+
+    linear_feature_learning('features/mobilenet_v3_small_gtsrb_train.pt', 'labels/gtsrb_train.pt',
+                            'features/mobilenet_v3_small_gtsrb_test.pt', 'labels/gtsrb_test.pt', 'mobilenet')
+
+    linear_feature_learning('features/resnet18_gtsrb_train.pt', 'labels/gtsrb_train.pt',
+                            'features/resnet18_gtsrb_test.pt', 'labels/gtsrb_test.pt', 'resnet')
+    
 
 if __name__ == '__main__':
-    main()
+    feature_extraction([ConvNextTiny(), DinoV2(), MobileNetV3Small(), Resnet18()], '')
